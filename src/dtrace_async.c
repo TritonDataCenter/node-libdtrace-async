@@ -693,9 +693,9 @@ dta_dt_aggwalk(const dtrace_aggdata_t *agg, void *arg)
 	 *   				bucket.
 	 *
 	 *   LLQUANTIZE:		values are "factor", "low", "high",
-	 *   				"nsteps" followed by the pairs of values
-	 *   				denoting the bucket index and the value
-	 *   				in that bucket.
+	 *   				"nsteps", "nbuckets", followed by the
+	 *   				pairs of values denoting the bucket
+	 *   				index and the value in that bucket.
 	 *
 	 * Recall that there's one record for the variable ID, one for the
 	 * value, and one for each aggregation key.  Our initial argc ignores
@@ -821,6 +821,8 @@ dta_aggwalk_argv_populate(dta_hdl_t *dtap, shim_val_t **argv, int argc,
 			    DTRACE_LLQUANTIZE_HIGH(arg)));
 			APPEND(shim_integer_new(ctx,
 			    DTRACE_LLQUANTIZE_NSTEP(arg)));
+			APPEND(shim_integer_new(ctx,
+			    (aggrec->dtrd_size / sizeof (uint64_t)) - 1));
 		}
 
 		for (bi = 0; bi < levels; bi++) {
