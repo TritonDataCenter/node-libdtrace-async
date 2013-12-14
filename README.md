@@ -18,40 +18,42 @@ change, and there may be stability issues.
 Here's "hello, world", using
 [vasync](https://github.com/davepacheco/node-vasync) to manage the asynchrony:
 
-    var lda = require('dtrace-async');
-    var vasync = require('vasync');
-    var prog = 'BEGIN{ trace("hello, world"); }';
-    var consumer;
-    vasync.pipeline({
-        'funcs': [
-    	function setup(_, callback) {
-    		consumer = lda.createConsumer();
-    		console.log('dtrace version: ', consumer.version());
-    		consumer.on('ready', callback);
-    	},
-    	function compile(_, callback) {
-    		console.log('consumer ready, compiling');
-    		consumer.strcompile(prog, callback);
-    	},
-    	function enable(_, callback) {
-    		console.log('compiled, enabling');
-    		consumer.go(callback);
-    	},
-    	function consume(_, callback) {
-    		console.log('enabled, consuming');
-    		consumer.consume(function (probe, value) {
-    			if (!value)
-    				return;
-    			console.log('consume: ', value.data);
-    		});
-    		consumer.stop(callback);
-    	}
-        ]
-    }, function (err) {
-    	if (err)
-    		throw (err);
-    	console.log('stopped');
-    });
+```javascript
+var lda = require('dtrace-async');
+var vasync = require('vasync');
+var prog = 'BEGIN{ trace("hello, world"); }';
+var consumer;
+vasync.pipeline({
+    'funcs': [
+	function setup(_, callback) {
+		consumer = lda.createConsumer();
+		console.log('dtrace version: ', consumer.version());
+		consumer.on('ready', callback);
+	},
+	function compile(_, callback) {
+		console.log('consumer ready, compiling');
+		consumer.strcompile(prog, callback);
+	},
+	function enable(_, callback) {
+		console.log('compiled, enabling');
+		consumer.go(callback);
+	},
+	function consume(_, callback) {
+		console.log('enabled, consuming');
+		consumer.consume(function (probe, value) {
+			if (!value)
+				return;
+			console.log('consume: ', value.data);
+		});
+		consumer.stop(callback);
+	}
+    ]
+}, function (err) {
+	if (err)
+		throw (err);
+	console.log('stopped');
+});
+```
 
 If you want a more concise, synchronous interface, see the original
 node-libdtrace.  See below for the differences between this version and the
