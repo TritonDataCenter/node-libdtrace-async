@@ -1,11 +1,8 @@
-/* XXX should be included by shim.h. */
-#include <stdlib.h>	/* for malloc */
-#include <sys/types.h>	/* for size_t */
-
 #include <shim.h>
 
 #include <assert.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
@@ -88,6 +85,15 @@ static int dta_bufhandler(const dtrace_bufdata_t *bufdata, void *arg);
 
 static void dta_async_open(dta_hdl_t *);
 
+/*
+ * XXX For reasons not yet well understood, values of type "external" that
+ * represent C pointers sometimes get translated by V8 into SMIs.  But when you
+ * unpack them as an integer, V8 implicitly shifts the value over.  We need to
+ * shift it back here.  The right answer, of course, is for the shim library to
+ * properly support unpacking EXTERNALs.
+ */
+#define	UNPACK_SELF(arg) ((dta_hdl_t *)((arg) << 1))
+
 static int
 dta_init(shim_ctx_t *ctx, shim_args_t *args)
 {
@@ -126,7 +132,6 @@ dta_async_begin(shim_ctx_t *ctx, dta_hdl_t *dtap,
 	assert(dtap->dta_func == NULL);
 	assert(dtap->dta_callback == NULL);
 
-	/* XXX how does this fail? */
 	callback = shim_persistent_new(ctx, lcallback);
 	dtap->dta_flags |= DTA_F_BUSY;
 	dtap->dta_func = func;
@@ -183,7 +188,6 @@ dta_async_uvafter(shim_ctx_t *ctx, shim_work_t *req, int status, void *arg)
 {
 	dta_hdl_t *dtap = arg;
 	shim_val_t *argv[1];
-	shim_val_t *rval;
 	shim_val_t *callback;
 
 	assert((dtap->dta_flags & DTA_F_BUSY) != 0);
@@ -193,11 +197,8 @@ dta_async_uvafter(shim_ctx_t *ctx, shim_work_t *req, int status, void *arg)
 	dtap->dta_flags &= ~DTA_F_BUSY;
 
 	argv[0] = dta_error_obj(dtap, ctx);
-	rval = malloc(16); // XXX not possible to know how big this needs to be
-	(void) shim_make_callback_val(ctx, NULL, callback, 1, argv, rval);
-	shim_value_release(argv[0]); // XXX what if it's JS "null"?
-	shim_value_release(rval);
-	// free(rval); // XXX
+	(void) shim_make_callback_val(ctx, NULL, callback, 1, argv, NULL);
+	shim_value_release(argv[0]);
 	shim_persistent_dispose(callback);
 }
 
@@ -308,7 +309,6 @@ dta_bufhandler(const dtrace_bufdata_t *bufdata, void *arg)
 	dtrace_probedesc_t *pd = data->dtpda_pdesc;
 	shim_ctx_t *ctx = dtap->dta_consume_ctx;
 	shim_val_t *argv[5];
-	shim_val_t *rval;
 	int i, argc;
 
 	if (rec == NULL || rec->dtrd_action != DTRACEACT_PRINTF)
@@ -321,25 +321,21 @@ dta_bufhandler(const dtrace_bufdata_t *bufdata, void *arg)
 	argv[4] = shim_string_new_copy(ctx, bufdata->dtbda_buffered);
 	argc = 5;
 
-	rval = malloc(16); // XXX
-	(void) shim_make_callback_val(ctx, NULL,
-	    dtap->dta_consume_callback, argc, argv, rval);
-	shim_value_release(rval);
+	(void) shim_func_call_val(ctx, NULL,
+	    dtap->dta_consume_callback, argc, argv, NULL);
 	for (i = 0; i < argc; i++)
 		shim_value_release(argv[i]);
-	// free(rval); // XXX
 	return (DTRACE_HANDLE_OK);
 }
 
 static int
 dta_strcompile(shim_ctx_t *ctx, shim_args_t *args)
 {
-	shim_val_t *jsstr = malloc(16); /* XXX */
-	shim_val_t *callback = malloc(16); /* XXX */
-	char *cstr;
-	size_t len;
 	uintptr_t selfptr;
 	dta_hdl_t *dtap;
+	int rv;
+	shim_val_t *jsstr = shim_value_alloc();
+	shim_val_t *callback = shim_value_alloc();
 
 	/* XXX backwards convention? 0 == failure? */
 	if (!shim_unpack(ctx, args,
@@ -350,36 +346,27 @@ dta_strcompile(shim_ctx_t *ctx, shim_args_t *args)
 		return (FALSE);
 	}
 
-	/* XXX */
-	selfptr <<= 1;
-	dtap = (dta_hdl_t *)selfptr;
+	dtap = UNPACK_SELF(selfptr);
 
 	if ((dtap->dta_flags & DTA_F_BUSY) != 0) {
 		shim_throw_error(ctx, "consumer is busy");
 		return (TRUE);
 	}
 
-	/*
-	 * XXX shim_string_value: if caller's supposed to free, it shouldn't be
-	 * const
-	 * XXX is this the right way to do this?
-	 * XXX what's the return value and "options" flags to
-	 * shim_string_write_ascii?
-	 */
-	len = shim_string_length_utf8(jsstr);
-	cstr = malloc(len + 1);
-	cstr[len] = '\0';
-	(void) shim_string_write_ascii(jsstr, cstr, 0, len, 0);
-	dtap->dta_uarg1 = cstr;
-	return (dta_async_begin(ctx, dtap, dta_async_strcompile, callback));
+	dtap->dta_uarg1 = shim_string_value(jsstr);
+	shim_value_release(jsstr);
+	rv = dta_async_begin(ctx, dtap, dta_async_strcompile, callback);
+	shim_value_release(callback);
+	return (rv);
 }
 
 static int
 dta_go(shim_ctx_t *ctx, shim_args_t *args)
 {
-	shim_val_t *callback = malloc(16); /* XXX */
 	uintptr_t selfptr;
 	dta_hdl_t *dtap;
+	int rv;
+	shim_val_t *callback = shim_value_alloc();
 
 	if (!shim_unpack(ctx, args,
 	    SHIM_TYPE_UINT32, &selfptr,
@@ -388,24 +375,25 @@ dta_go(shim_ctx_t *ctx, shim_args_t *args)
 		return (FALSE);
 	}
 
-	/* XXX */
-	selfptr <<= 1;
-	dtap = (dta_hdl_t *)selfptr;
+	dtap = UNPACK_SELF(selfptr);
 
 	if ((dtap->dta_flags & DTA_F_BUSY) != 0) {
 		shim_throw_error(ctx, "consumer is busy");
 		return (TRUE);
 	}
 
-	return (dta_async_begin(ctx, dtap, dta_async_go, callback));
+	rv = dta_async_begin(ctx, dtap, dta_async_go, callback);
+	shim_value_release(callback);
+	return (rv);
 }
 
 static int
 dta_stop(shim_ctx_t *ctx, shim_args_t *args)
 {
-	shim_val_t *callback = malloc(16); /* XXX */
 	uintptr_t selfptr;
 	dta_hdl_t *dtap;
+	int rv;
+	shim_val_t *callback = shim_value_alloc();
 
 	if (!shim_unpack(ctx, args,
 	    SHIM_TYPE_UINT32, &selfptr,
@@ -414,9 +402,7 @@ dta_stop(shim_ctx_t *ctx, shim_args_t *args)
 		return (FALSE);
 	}
 
-	/* XXX */
-	selfptr <<= 1;
-	dtap = (dta_hdl_t *)selfptr;
+	dtap = UNPACK_SELF(selfptr);
 
 	if ((dtap->dta_flags & DTA_F_BUSY) != 0) {
 		/*
@@ -427,18 +413,20 @@ dta_stop(shim_ctx_t *ctx, shim_args_t *args)
 		return (TRUE);
 	}
 
-	return (dta_async_begin(ctx, dtap, dta_async_stop, callback));
+	rv = dta_async_begin(ctx, dtap, dta_async_stop, callback);
+	shim_value_release(callback);
+	return (rv);
 }
 
 static int
 dta_setopt(shim_ctx_t *ctx, shim_args_t *args)
 {
-	shim_val_t *option = malloc(16); /* XXX */
-	shim_val_t *value = malloc(16); /* XXX */
 	char *coption, *cvalue;
 	uintptr_t selfptr;
 	dta_hdl_t *dtap;
 	dtrace_hdl_t *dtp;
+	shim_val_t *option = shim_value_alloc();
+	shim_val_t *value = shim_value_alloc();
 
 	if (!shim_unpack(ctx, args,
 	    SHIM_TYPE_UINT32, &selfptr,
@@ -446,15 +434,13 @@ dta_setopt(shim_ctx_t *ctx, shim_args_t *args)
 	    SHIM_TYPE_UNKNOWN))
 		return (FALSE);
 
-	/* XXX */
-	selfptr <<= 1;
-	dtap = (dta_hdl_t *)selfptr;
+	dtap = UNPACK_SELF(selfptr);
 	dtp = dtap->dta_dtrace;
 
-	coption = (char *)shim_string_value(option);
+	coption = shim_string_value(option);
 	value = shim_args_get(args, 2);
 	if (shim_value_is(value, SHIM_TYPE_STRING)) {
-		cvalue = (char *)shim_string_value(value);
+		cvalue = shim_string_value(value);
 	} else {
 		cvalue = NULL;
 	}
@@ -465,6 +451,8 @@ dta_setopt(shim_ctx_t *ctx, shim_args_t *args)
 
 	free(coption);
 	free(cvalue);
+	shim_value_release(option);
+	shim_value_release(value);
 	return (TRUE);
 }
 
@@ -545,7 +533,6 @@ dta_dt_record(dta_hdl_t *dtap, const dtrace_recdesc_t *rec, caddr_t addr)
 	case DTRACEACT_DIFEXPR:
 		switch (rec->dtrd_size) {
 		case sizeof (uint64_t):
-			/* XXX shim doesn't support 64-bit ints? */
 			return (shim_number_new(ctx,
 			    (double)(*(int64_t *)addr)));
 
@@ -615,7 +602,6 @@ dta_dt_consumehandler(const dtrace_probedata_t *data,
 	dtrace_probedesc_t *pd = data->dtpda_pdesc;
 	shim_val_t *callback = dtap->dta_consume_callback;
 	shim_val_t *argv[5];
-	shim_val_t *rval;
 	shim_ctx_t *ctx = dtap->dta_consume_ctx;
 	int i, argc;
 
@@ -637,8 +623,8 @@ dta_dt_consumehandler(const dtrace_probedata_t *data,
 
 		(void) snprintf(dtap->dta_errmsg, sizeof (dtap->dta_errmsg),
 		    "unsupported action %s in record for %s:%s:%s:%s\n",
-		    dta_dt_action(rec->dtrd_action), pd->dtpd_provider, pd->dtpd_mod,
-		    pd->dtpd_func, pd->dtpd_name);
+		    dta_dt_action(rec->dtrd_action), pd->dtpd_provider,
+		    pd->dtpd_mod, pd->dtpd_func, pd->dtpd_name);
 		dtap->dta_rval = -1;
 		return (DTRACE_CONSUME_ABORT);
 	}
@@ -646,23 +632,20 @@ dta_dt_consumehandler(const dtrace_probedata_t *data,
 	argv[argc++] = dta_dt_record(dtap, rec, data->dtpda_data);
 
 done:
-	rval = malloc(16); // XXX
-	(void) shim_make_callback_val(ctx, NULL, callback, argc, argv, rval);
-	shim_value_release(rval);
+	(void) shim_func_call_val(ctx, NULL, callback, argc, argv, NULL);
 	for (i = 0; i < argc; i++)
 		shim_value_release(argv[i]);
-	// free(rval); // XXX
 	return (DTRACE_CONSUME_THIS);
 }
 
 static int
 dta_consume(shim_ctx_t *ctx, shim_args_t *args)
 {
-	shim_val_t *callback = malloc(16); /* XXX */
 	uintptr_t selfptr;
 	dta_hdl_t *dtap;
 	dtrace_workstatus_t status;
 	dtrace_hdl_t *dtp;
+	shim_val_t *callback = shim_value_alloc();
 
 	if (!shim_unpack(ctx, args,
 	    SHIM_TYPE_UINT32, &selfptr,
@@ -671,9 +654,7 @@ dta_consume(shim_ctx_t *ctx, shim_args_t *args)
 		return (FALSE);
 	}
 
-	/* XXX */
-	selfptr <<= 1;
-	dtap = (dta_hdl_t *)selfptr;
+	dtap = UNPACK_SELF(selfptr);
 	dtp = dtap->dta_dtrace;
 
 	if ((dtap->dta_flags & (DTA_F_BUSY | DTA_F_CONSUMING)) != 0) {
@@ -694,6 +675,7 @@ dta_consume(shim_ctx_t *ctx, shim_args_t *args)
 	if (status != 0)
 		dtap->dta_rval = 0;
 
+	shim_value_release(callback);
 	dta_error_throw(dtap, ctx);
 	return (TRUE);
 }
@@ -884,13 +866,10 @@ dta_dt_aggwalk(const dtrace_aggdata_t *agg, void *arg)
 	(void) dta_aggwalk_argv_populate(dtap, &argv[i + 1], nvalargs, agg,
 	    NULL);
 
-	shim_val_t *rval = malloc(16); // XXX
-	(void) shim_make_callback_val(ctx, NULL, callback, argc, argv, rval);
-	shim_value_release(rval);
+	(void) shim_func_call_val(ctx, NULL, callback, argc, argv, NULL);
 	for (i = 0; i < argc; i++)
 		shim_value_release(argv[i]);
 	free(argv);
-	// free(rval); // XXX
 	return (DTRACE_AGGWALK_REMOVE);
 }
 
@@ -927,9 +906,9 @@ dta_do_aggwalk(shim_ctx_t *ctx, dta_hdl_t *dtap)
 static int
 dta_aggwalk(shim_ctx_t *ctx, shim_args_t *args)
 {
-	shim_val_t *callback = malloc(16); /* XXX */
 	uintptr_t selfptr;
 	dta_hdl_t *dtap;
+	shim_val_t *callback = shim_value_alloc();
 
 	if (!shim_unpack(ctx, args,
 	    SHIM_TYPE_UINT32, &selfptr,
@@ -939,10 +918,7 @@ dta_aggwalk(shim_ctx_t *ctx, shim_args_t *args)
 	}
 
 	/* XXX commonize this with dta_consume? */
-
-	/* XXX */
-	selfptr <<= 1;
-	dtap = (dta_hdl_t *)selfptr;
+	dtap = UNPACK_SELF(selfptr);
 
 	if ((dtap->dta_flags & (DTA_F_BUSY | DTA_F_CONSUMING)) != 0) {
 		shim_throw_error(ctx, "consumer is busy");
@@ -957,6 +933,7 @@ dta_aggwalk(shim_ctx_t *ctx, shim_args_t *args)
 	dtap->dta_consume_callback = NULL;
 	dtap->dta_consume_ctx = NULL;
 	dtap->dta_flags &= ~DTA_F_CONSUMING;
+	shim_value_release(callback);
 	dta_error_throw(dtap, ctx);
 	return (TRUE);
 }
@@ -986,27 +963,24 @@ dta_conf_t dta_conf_vars[] = {
 static int
 dta_conf(shim_ctx_t *ctx, shim_args_t *args)
 {
-	shim_val_t *callback, *rval;
+	shim_val_t *callback;
 	shim_val_t *argv[2];
 	int i, nvars;
 
-	callback = malloc(16); /* XXX */
+	callback = shim_value_alloc();
 	if (!shim_unpack(ctx, args,
 	    SHIM_TYPE_FUNCTION, &callback, SHIM_TYPE_UNKNOWN))
 		return (FALSE);
 
-	rval = malloc(16); /* XXX */
 	nvars = sizeof (dta_conf_vars) / sizeof (dta_conf_vars[0]);
 	for (i = 0; i < nvars; i++) {
 		argv[0] = shim_string_new_copy(ctx, dta_conf_vars[i].dtc_name);
 		argv[1] = shim_number_new(ctx, dta_conf_vars[i].dtc_value);
-		(void) shim_make_callback_val(ctx, NULL, callback,
-		    2, argv, rval);
+		(void) shim_func_call_val(ctx, NULL, callback, 2, argv, NULL);
 		shim_value_release(argv[0]);
 		shim_value_release(argv[1]);
 	}
 
-	// free(rval); // XXX
 	return (TRUE);
 }
 
