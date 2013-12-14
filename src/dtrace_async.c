@@ -827,7 +827,7 @@ dta_aggwalk_argv_populate(dta_hdl_t *dtap, shim_val_t **argv, int argc,
 			if (!data[bi])
 				continue;
 
-			APPEND(shim_number_new(ctx, data[bi]));
+			APPEND(shim_integer_new(ctx, bi));
 			APPEND(shim_number_new(ctx, data[bi]));
 		}
 
