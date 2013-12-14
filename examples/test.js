@@ -1,4 +1,4 @@
-var lda = require('../lib/libdtrace-async');
+var lda = require('../lib/dtrace-async');
 
 var consumer = lda.createConsumer();
 console.log('dtrace version: ', consumer.version());

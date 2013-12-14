@@ -2,8 +2,9 @@
 	"name": "libdtrace-async",
 	"version": "0.0.1",
 	"description": "Asynchronous libdtrace bindings",
-	"main": "lib/libdtrace-async.js",
+	"main": "lib/dtrace-async.js",
 	"dependencies": {
-		"addon-layer": "git://github.com/davepacheco/node-addon-layer.git#dap"
+		"addon-layer": "git://github.com/davepacheco/node-addon-layer.git#dap",
+		"bindings": "1.1.1"
 	}
 }

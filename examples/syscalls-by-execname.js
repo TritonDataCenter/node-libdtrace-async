@@ -1,4 +1,4 @@
-var lda = require('../lib/libdtrace-async');
+var lda = require('../lib/dtrace-async');
 var sys = require('sys');
 var dtp = lda.createConsumer();
 var prog = 'syscall:::entry { @[execname] = count(); }'
