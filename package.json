@@ -6,5 +6,8 @@
 	"dependencies": {
 		"addon-layer": "git://github.com/davepacheco/node-addon-layer.git#dap",
 		"bindings": "1.1.1"
+	},
+	"devDependencies": {
+		"vasync": "1.4.1"
 	}
 }
