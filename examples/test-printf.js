@@ -3,8 +3,8 @@ var lda = require('../lib/dtrace-async');
 var consumer = lda.createConsumer();
 console.log('dtrace version: ', consumer.version());
 consumer.on('ready', function () {
-	console.log('consumer is ready');
-	consumer.strcompile('BEGIN{ printf("hello, %03d", 3); }', function (err) {
+console.log('consumer is ready');
+consumer.strcompile('BEGIN{ printf("hello, %03d", 3); }', function (err) {
 		if (err) {
 			console.error(err);
 			return;

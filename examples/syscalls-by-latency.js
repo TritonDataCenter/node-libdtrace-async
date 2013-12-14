@@ -47,11 +47,11 @@ function tick()
 {
 	var i, j, val;
 
-	dtp.aggwalk(function (id, key, val) {
+	dtp.aggwalk(function (id, key, aggval) {
 		if (!syscalls.hasOwnProperty(key[0]))
 			keys.push(key[0]);
 
-		syscalls[key[0]] = val;
+		syscalls[key[0]] = aggval;
 	});
 
 	keys.sort();
